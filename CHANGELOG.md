@@ -2,6 +2,26 @@
 
 All notable changes to Tuya Smart Taskbar will be documented in this file.
 
+## [2.3.0] - 2026-08-23
+
+### Fixed
+- **1–2 Hour Tray Event Freeze / Lockup** - Fixed a critical memory and OS handle leak where the 10-second auto-refresh loop reconstructed the entire native `Menu` tree on every cycle. Over time, registering thousands of duplicate items into Muda/Tao's internal event table corrupted event dispatch and exhausted OS menu handles, making tray clicks (toggles, settings, quit) unresponsive.
+- **Initial Fan Speed Display** - Fixed fan speed showing level `1` on startup when running at other speeds (e.g. speed `3`). `TuyaValue` now parses string integers (`"3"`), percentage values (`60` -> level 3), and level identifiers (`"level_3"` / `"speed_3"`). Expanded DP code matching to support `"fan_speed_percent"`, `"fan_speed"`, `"speed"`, and `"fan_speed_enum"`.
+- **Non-blocking Quit** - Removed `std::thread::sleep` from the main GUI event loop thread, allowing immediate app termination when clicking "Quit".
+- **Token Refresh Failure Accounting** - Fixed rate-limit failure counter double-incrementing when a refresh token request fails and falls back to acquiring a new access token.
+- **Tuya Token Expiry Error Handling** - Added explicit retry handling for Tuya API error code `1010` (token invalid/expired) in client retry logic.
+- **Config Accessibility** - Converted static checkbox `<div>` to a semantic `<label for="runOnStartup">` with accessible markup, resolving Biome accessibility check errors.
+
+### Added
+- **Instant In-Place Control Feedback** - Changing multi-value controls (fan speed, temperature, AC fan speed, AC mode) now immediately updates checkmarks in the tray menu and local cache upon API success without waiting for the next polling cycle.
+- **2-Space Formatter Configurations** - Configured 2-space indentation across both Biome (`biome.json`) and Rust (`rustfmt.toml`).
+- **VS Code Workspace Settings** - Added `.vscode/settings.json` and `.vscode/extensions.json` with default formatter associations and extension recommendations.
+- **Unit Test Suites** - Added test suites for `update::is_newer_version`, `tuya::parse_fan_speed`, `tuya::parse_temperature`, and `tuya::TuyaValue::as_i64`.
+
+### Changed
+- **Decoupled Data Fetching from UI Construction** - Polling is split into `fetch_device_statuses` (network fetch) and `build_device_menu` (UI creation). During 10s auto-refresh, in-place updates mutate existing check menu items via `update_menu_items_in_place` without creating any new `Menu` or `CheckMenuItem` allocations.
+- **Robust SemVer Comparison** - `update::is_newer_version` now safely trims `v` / `V` tag prefixes using array pattern matching.
+
 ## [2.2.0] - 2026-03-31
 
 ### Added
