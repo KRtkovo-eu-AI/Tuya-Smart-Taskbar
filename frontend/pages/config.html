@@ -336,7 +336,7 @@
 				display: block;
 			}
 
-			.checkbox-group label {
+			.checkbox-group .checkbox-label {
 				font-size: 0.9375rem;
 				color: var(--text-primary);
 				cursor: pointer;
@@ -530,13 +530,13 @@
 						<div class="error-message">User ID is required</div>
 					</div>
 
-					<div class="checkbox-group" onclick="document.getElementById('runOnStartup').click()">
+					<label class="checkbox-group" for="runOnStartup">
 						<div class="checkbox-wrapper">
-							<input type="checkbox" id="runOnStartup" checked onclick="event.stopPropagation()" />
+							<input type="checkbox" id="runOnStartup" checked />
 							<span class="checkmark"></span>
 						</div>
-						<label for="runOnStartup" onclick="event.stopPropagation()">Run on system startup</label>
-					</div>
+						<span class="checkbox-label">Run on system startup</span>
+					</label>
 
 					<div class="button-group">
 						<button id="test-btn" type="button" class="test-btn">

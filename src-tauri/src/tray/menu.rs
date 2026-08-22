@@ -316,7 +316,7 @@ pub async fn build_device_menu_with_cache(
 
     let statuses: Vec<Result<Vec<TuyaDeviceStatus>, AppError>> = join_all(status_futures).await;
 
-    for (device, status_result) in online_devices.iter().zip(statuses.into_iter()) {
+    for (device, status_result) in online_devices.iter().zip(statuses) {
         match status_result {
             Ok(status) => {
                 device_statuses.insert(device.id.clone(), status.clone());
