@@ -191,22 +191,6 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 
 Tuya Smart Taskbar does **not** collect, store, or transmit any personal data. All API credentials are stored locally on your device in a platform-specific configuration file. Network requests are made exclusively to the Tuya Cloud API endpoints you configure, solely to control your smart home devices at your request. No analytics, telemetry, or third-party tracking is included.
 
-## Code Signing Policy
-
-Release binaries are signed to verify authenticity and integrity.
-
-| Role          | Responsibility                                                                             |
-| ------------- | ------------------------------------------------------------------------------------------ |
-| **Author**    | [Zahin A. Adib](https://github.com/Adib23704) - development, maintenance, signing approval |
-| **Reviewers** | All external contributions are reviewed before merge                                       |
-
-[sign-path-io-url]: https://signpath.io/
-[sign-path-foundation-url]: https://signpath.org/
-
-| Logo | Description |
-| :-----: | ----- |
-| [![SignPath logo](.github/images/signpath-logo.png)][sign-path-io-url] | Free code signing provided by [SignPath.io][sign-path-io-url], certificate by [SignPath Foundation][sign-path-foundation-url] |
-
 ## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.

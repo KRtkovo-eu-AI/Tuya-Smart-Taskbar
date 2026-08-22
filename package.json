@@ -1,29 +1,29 @@
 {
-	"name": "tuya-smart-taskbar",
-	"version": "2.2.0",
-	"private": true,
-	"description": "System tray app for controlling Tuya Smart Devices",
-	"type": "module",
-	"scripts": {
-		"tauri": "tauri",
-		"dev": "tauri dev",
-		"build": "tauri build",
-		"lint": "biome check .",
-		"lint:fix": "biome check . --write",
-		"lint:rust": "cd src-tauri && cargo clippy -- -D warnings",
-		"format": "biome format . --write",
-		"format:check": "biome format .",
-		"format:rust": "cd src-tauri && cargo fmt",
-		"validate": "biome check . && cd src-tauri && cargo fmt --check && cargo clippy -- -D warnings"
-	},
-	"repository": {
-		"type": "git",
-		"url": "git+https://github.com/Adib23704/Tuya-Smart-Taskbar.git"
-	},
-	"author": "Zahin A. Adib <adib23704@gmail.com> (https://adibdev.me/)",
-	"license": "MIT",
-	"devDependencies": {
-		"@biomejs/biome": "^2.5.10",
-		"@tauri-apps/cli": "^2.11.4"
-	}
+  "name": "tuya-smart-taskbar",
+  "version": "2.2.0",
+  "private": true,
+  "description": "System tray app for controlling Tuya Smart Devices",
+  "type": "module",
+  "scripts": {
+    "tauri": "tauri",
+    "dev": "tauri dev",
+    "build": "tauri build",
+    "lint": "biome check .",
+    "lint:fix": "biome check . --write",
+    "lint:rust": "cd src-tauri && cargo clippy -- -D warnings",
+    "format": "biome format . --write",
+    "format:check": "biome format .",
+    "format:rust": "cd src-tauri && cargo fmt",
+    "validate": "biome check . && cd src-tauri && cargo fmt --check && cargo clippy -- -D warnings"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Adib23704/Tuya-Smart-Taskbar.git"
+  },
+  "author": "Zahin A. Adib <adib23704@gmail.com> (https://adibdev.me/)",
+  "license": "MIT",
+  "devDependencies": {
+    "@biomejs/biome": "^2.5.10",
+    "@tauri-apps/cli": "^2.11.4"
+  }
 }
