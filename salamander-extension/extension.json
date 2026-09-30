@@ -1,6 +1,6 @@
 {
   "schema": 2,
-  "id": "TuyaSmartTaskbar.Devices",
+  "id": "TuyaSmartTaskbar",
   "name": "Tuya Smart Devices",
   "version": "2.4.0",
   "description": "Displays and controls Tuya Smart devices monitored by Tuya Smart Taskbar.",
@@ -20,9 +20,9 @@
   "events": [],
   "commands": [
     {
-      "id": "TuyaSmartTaskbar.Devices.open",
+      "id": "TuyaSmartTaskbar.open",
       "title": "Open Tuya Smart Devices",
-      "path": "salamatrix:TuyaSmartTaskbar.Devices!devices",
+      "path": "salamatrix:TuyaSmartTaskbar!devices",
       "menu": "none",
       "toolbar": true,
       "icon": "icon.svg",

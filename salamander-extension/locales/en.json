@@ -2,7 +2,7 @@
   "name": "Tuya Smart Devices",
   "description": "Displays and controls Tuya Smart devices monitored by Tuya Smart Taskbar.",
   "commands": {
-    "TuyaSmartTaskbar.Devices.open": "Open Tuya Smart Devices"
+    "TuyaSmartTaskbar.open": "Open Tuya Smart Devices"
   },
   "fileSystems": {
     "devices": {
