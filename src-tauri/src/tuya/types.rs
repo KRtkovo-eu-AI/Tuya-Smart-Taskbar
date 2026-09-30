@@ -4,6 +4,23 @@ use serde::{Deserialize, Serialize};
 
 pub const TOKEN_REFRESH_BUFFER_SECS: i64 = 300;
 
+fn deserialize_string_or_number<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+  D: serde::Deserializer<'de>,
+{
+  #[derive(Deserialize)]
+  #[serde(untagged)]
+  enum StringOrNumber {
+    String(String),
+    Number(serde_json::Number),
+  }
+
+  match StringOrNumber::deserialize(deserializer)? {
+    StringOrNumber::String(value) => Ok(value),
+    StringOrNumber::Number(value) => Ok(value.to_string()),
+  }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TuyaDevice {
   pub id: String,
@@ -24,6 +41,8 @@ pub struct TuyaDevice {
   pub active_time: i64,
   #[serde(default)]
   pub icon: String,
+  #[serde(default, alias = "room_id", alias = "roomId")]
+  pub room_id: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -130,6 +149,56 @@ pub struct TuyaApiResponse<T> {
   pub msg: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TuyaHome {
+  #[serde(alias = "home_id", deserialize_with = "deserialize_string_or_number")]
+  pub id: String,
+  #[serde(default, alias = "home_name")]
+  pub name: String,
+  #[serde(default, alias = "roomList", alias = "room_list")]
+  pub rooms: Vec<TuyaRoom>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TuyaHomeRooms {
+  #[serde(
+    default,
+    alias = "home_id",
+    deserialize_with = "deserialize_string_or_number"
+  )]
+  pub home_id: String,
+  #[serde(default)]
+  pub name: String,
+  #[serde(default)]
+  pub rooms: Vec<TuyaRoom>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TuyaRoom {
+  #[serde(alias = "room_id", deserialize_with = "deserialize_string_or_number")]
+  pub id: String,
+  #[serde(default, alias = "room_name")]
+  pub name: String,
+  #[serde(
+    default,
+    alias = "deviceIds",
+    alias = "device_ids",
+    alias = "deviceList"
+  )]
+  pub device_ids: Vec<String>,
+  #[serde(default)]
+  pub devices: Vec<TuyaRoomDevice>,
+  #[serde(skip)]
+  pub home_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TuyaRoomDevice {
+  #[serde(alias = "device_id")]
+  pub id: String,
+  #[serde(default, alias = "room_id", alias = "roomId")]
+  pub room_id: String,
+}
 #[derive(Debug, Clone, Deserialize)]
 pub struct TokenResponse {
   pub access_token: String,

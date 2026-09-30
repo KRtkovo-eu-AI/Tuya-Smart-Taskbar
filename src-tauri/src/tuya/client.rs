@@ -1,11 +1,13 @@
+use futures::future::join_all;
 use std::sync::Arc;
-use std::time::Duration;
-use tokio::sync::RwLock;
+use std::time::{Duration, Instant};
+use tokio::sync::{Mutex, RwLock};
 
 use super::auth::SignedHeaders;
 use super::token::TokenManager;
 use super::types::{
-  TuyaApiResponse, TuyaCommand, TuyaCommandPayload, TuyaDevice, TuyaDeviceStatus, TuyaValue,
+  TuyaApiResponse, TuyaCommand, TuyaCommandPayload, TuyaDevice, TuyaDeviceStatus, TuyaHome,
+  TuyaHomeRooms, TuyaRoom, TuyaValue,
 };
 use crate::error::AppError;
 
@@ -13,6 +15,13 @@ const REQUEST_TIMEOUT_SECS: u64 = 30;
 const CONNECT_TIMEOUT_SECS: u64 = 10;
 const MAX_RETRIES: u32 = 3;
 const INITIAL_RETRY_DELAY_MS: u64 = 500;
+const ROOM_CACHE_TTL: Duration = Duration::from_secs(30);
+
+struct RoomCache {
+  loaded_at: Instant,
+  user_id: String,
+  rooms: Vec<TuyaRoom>,
+}
 
 pub struct TuyaClient {
   token_manager: TokenManager,
@@ -20,6 +29,7 @@ pub struct TuyaClient {
   base_url: String,
   client_id: String,
   secret: String,
+  room_cache: Mutex<Option<RoomCache>>,
 }
 
 impl TuyaClient {
@@ -41,6 +51,7 @@ impl TuyaClient {
       base_url,
       client_id,
       secret,
+      room_cache: Mutex::new(None),
     }
   }
 
@@ -206,6 +217,81 @@ impl TuyaClient {
   pub async fn fetch_devices(&self, user_id: &str) -> Result<Vec<TuyaDevice>, AppError> {
     let path = format!("/v1.0/users/{}/devices", user_id);
     self.get(&path).await
+  }
+
+  pub async fn fetch_homes(&self, user_id: &str) -> Result<Vec<TuyaHome>, AppError> {
+    let path = format!("/v1.0/users/{}/homes", user_id);
+    self.get(&path).await
+  }
+
+  pub async fn fetch_rooms(&self, home_id: &str) -> Result<Vec<TuyaRoom>, AppError> {
+    let path = format!("/v1.0/homes/{}/rooms", home_id);
+    let response: TuyaHomeRooms = self.get(&path).await?;
+    Ok(
+      response
+        .rooms
+        .into_iter()
+        .map(|mut room| {
+          room.home_id = home_id.to_string();
+          room
+        })
+        .collect(),
+    )
+  }
+
+  pub async fn fetch_room_devices(
+    &self,
+    home_id: &str,
+    room_id: &str,
+  ) -> Result<Vec<TuyaDevice>, AppError> {
+    let path = format!("/v1.0/homes/{}/rooms/{}/devices", home_id, room_id);
+    self.get(&path).await
+  }
+
+  pub async fn fetch_rooms_for_user(
+    &self,
+    user_id: &str,
+    _devices: &[TuyaDevice],
+  ) -> Result<Vec<TuyaRoom>, AppError> {
+    let cached_rooms = {
+      let cache = self.room_cache.lock().await;
+      cache.as_ref().and_then(|entry| {
+        if entry.user_id == user_id && entry.loaded_at.elapsed() < ROOM_CACHE_TTL {
+          Some(entry.rooms.clone())
+        } else {
+          None
+        }
+      })
+    };
+    if let Some(rooms) = cached_rooms {
+      return Ok(rooms);
+    }
+
+    let homes = self.fetch_homes(user_id).await?;
+    let room_batches = join_all(homes.iter().map(|home| async move {
+      let mut home_rooms = self.fetch_rooms(&home.id).await?;
+      let room_devices = join_all(
+        home_rooms
+          .iter()
+          .map(|room| async { self.fetch_room_devices(&home.id, &room.id).await }),
+      )
+      .await;
+      for (room, devices) in home_rooms.iter_mut().zip(room_devices) {
+        room.device_ids = devices?.into_iter().map(|device| device.id).collect();
+      }
+      Ok::<Vec<TuyaRoom>, AppError>(home_rooms)
+    }))
+    .await;
+    let mut rooms = Vec::new();
+    for batch in room_batches {
+      rooms.extend(batch?);
+    }
+    *self.room_cache.lock().await = Some(RoomCache {
+      loaded_at: Instant::now(),
+      user_id: user_id.to_string(),
+      rooms: rooms.clone(),
+    });
+    Ok(rooms)
   }
 
   pub async fn fetch_device_status(

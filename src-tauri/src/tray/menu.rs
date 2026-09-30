@@ -12,7 +12,7 @@ use crate::config::ConfigManager;
 use crate::error::AppError;
 use crate::tuya::{
   parse_ac_fan_speed, parse_fan_speed, parse_temperature, SharedTuyaClient, TuyaDevice,
-  TuyaDeviceStatus, TuyaValue, AC_FAN_SPEED_LEVELS, AC_MODES, FAN_SPEED_LEVELS,
+  TuyaDeviceStatus, TuyaRoom, TuyaValue, AC_FAN_SPEED_LEVELS, AC_MODES, FAN_SPEED_LEVELS,
   LIGHT_BRIGHTNESS_CODES, LIGHT_TEMPERATURE_CODES, TEMP_MAX, TEMP_MIN,
 };
 use crate::update::SharedUpdateState;
@@ -141,7 +141,7 @@ pub fn build_device_submenu(
 
         for temp in TEMP_MIN..=TEMP_MAX {
           let id = format!("set:{}:temp_set:{}", device.id, temp);
-          let label = format!("{}°C", temp);
+          let label = format!("{}Ä‚â€šĂ‚Â°C", temp);
           let item = CheckMenuItem::with_id(app, &id, &label, true, current == temp, None::<&str>)
             .map_err(|e| AppError::Tray(e.to_string()))?;
           let registry_key = format!("{}:temp_set:{}", device.id, temp);
@@ -326,42 +326,62 @@ pub async fn fetch_device_statuses(
   client: &SharedTuyaClient,
   config: &ConfigManager,
 ) -> Result<(Vec<TuyaDevice>, HashMap<String, Vec<TuyaDeviceStatus>>), AppError> {
+  let (devices, statuses, _, _) = fetch_device_statuses_with_errors(client, config).await?;
+  Ok((devices, statuses))
+}
+
+pub async fn fetch_device_statuses_with_errors(
+  client: &SharedTuyaClient,
+  config: &ConfigManager,
+) -> Result<
+  (
+    Vec<TuyaDevice>,
+    HashMap<String, Vec<TuyaDeviceStatus>>,
+    HashMap<String, String>,
+    Vec<TuyaRoom>,
+  ),
+  AppError,
+> {
   let user_id = config
     .get_user_id()
     .ok_or(AppError::Config("User ID not configured".to_string()))?;
-
   let guard = client.read().await;
   let tuya_client = guard.as_ref().ok_or(AppError::NotConfigured)?;
-
   let devices = tuya_client.fetch_devices(&user_id).await?;
+  let rooms = match tuya_client.fetch_rooms_for_user(&user_id, &devices).await {
+    Ok(rooms) => rooms,
+    Err(error) => {
+      tracing::warn!("Failed to fetch rooms: {}", error);
+      Vec::new()
+    }
+  };
   let online_devices: Vec<_> = devices.iter().filter(|d| d.online).collect();
-
-  let status_futures: Vec<_> = online_devices
-    .iter()
-    .map(|d| tuya_client.fetch_device_status(&d.id))
-    .collect();
-
-  let statuses: Vec<Result<Vec<TuyaDeviceStatus>, AppError>> = join_all(status_futures).await;
-
-  let mut device_statuses: HashMap<String, Vec<TuyaDeviceStatus>> = HashMap::new();
-  for (device, status_result) in online_devices.iter().zip(statuses) {
-    match status_result {
+  let statuses: Vec<Result<Vec<TuyaDeviceStatus>, AppError>> = join_all(
+    online_devices
+      .iter()
+      .map(|d| tuya_client.fetch_device_status(&d.id)),
+  )
+  .await;
+  let mut device_statuses = HashMap::new();
+  let mut status_errors = HashMap::new();
+  for (device, result) in online_devices.iter().zip(statuses) {
+    match result {
       Ok(status) => {
         device_statuses.insert(device.id.clone(), status);
       }
-      Err(e) => {
-        tracing::warn!("Failed to fetch status for device {}: {}", device.id, e);
+      Err(error) => {
+        tracing::warn!("Failed to fetch status for device {}: {}", device.id, error);
+        status_errors.insert(device.id.clone(), error.to_string());
       }
     }
   }
-
-  Ok((devices, device_statuses))
+  Ok((devices, device_statuses, status_errors, rooms))
 }
-
 pub async fn build_device_menu(
   app: &AppHandle,
   devices: &[TuyaDevice],
   device_statuses: &HashMap<String, Vec<TuyaDeviceStatus>>,
+  rooms: &[TuyaRoom],
   update_state: &SharedUpdateState,
 ) -> Result<(Menu<Wry>, HashMap<String, CheckMenuItem<Wry>>), AppError> {
   let menu = Menu::new(app).map_err(|e| AppError::Tray(e.to_string()))?;
@@ -370,6 +390,30 @@ pub async fn build_device_menu(
   append_update_item(app, &menu, update_state).await?;
 
   let online_devices: Vec<_> = devices.iter().filter(|d| d.online).collect();
+
+  for room in rooms {
+    let room_devices: Vec<_> = online_devices
+      .iter()
+      .filter(|device| room.device_ids.contains(&device.id))
+      .collect();
+    let label = format!("{} ({} devices)", room.name, room_devices.len());
+    let submenu = Submenu::new(app, label, true).map_err(|e| AppError::Tray(e.to_string()))?;
+    for device in room_devices {
+      if let Some(status) = device_statuses.get(&device.id) {
+        submenu
+          .append(&build_device_submenu(app, device, status, &mut registry)?)
+          .map_err(|e| AppError::Tray(e.to_string()))?;
+      }
+    }
+    menu
+      .append(&submenu)
+      .map_err(|e| AppError::Tray(e.to_string()))?;
+  }
+  if !rooms.is_empty() {
+    menu
+      .append(&PredefinedMenuItem::separator(app).map_err(|e| AppError::Tray(e.to_string()))?)
+      .map_err(|e| AppError::Tray(e.to_string()))?;
+  }
 
   for device in &online_devices {
     if let Some(status) = device_statuses.get(&device.id) {

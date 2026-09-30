@@ -46,34 +46,69 @@
         { "id": "deviceId", "name": "Device ID", "description": "Tuya device identifier", "width": 250 }
       ],
       "actions": [
-        { "id": "openDevice", "title": "Open device", "handler": "openDevice", "default": true, "refresh": false },
-        { "id": "toggle", "title": "Toggle power", "handler": "toggle", "refresh": true },
+        {
+          "id": "openDevice",
+          "title": "Open device",
+          "handler": "openDevice",
+          "default": true,
+          "refresh": false,
+          "itemIdPrefix": "device-"
+        },
+        { "id": "toggle", "title": "Toggle power", "handler": "toggle", "refresh": true, "itemIdPrefix": "device-" },
+        {
+          "id": "roomToggle",
+          "title": "Toggle room lights",
+          "handler": "roomToggle",
+          "refresh": true,
+          "itemIdPrefix": "room-"
+        },
+        {
+          "id": "roomDaylight",
+          "title": "Room Daylight (70% / 70%)",
+          "handler": "roomDaylight",
+          "refresh": true,
+          "itemIdPrefix": "room-"
+        },
+        {
+          "id": "roomEvening",
+          "title": "Room Evening (30% / 30%)",
+          "handler": "roomEvening",
+          "refresh": true,
+          "itemIdPrefix": "room-"
+        },
+        {
+          "id": "roomNightlight",
+          "title": "Room Nightlight (5% / 5%)",
+          "handler": "roomNightlight",
+          "refresh": true,
+          "itemIdPrefix": "room-"
+        },
         {
           "id": "daylight",
           "title": "Daylight (70% / 70%)",
           "handler": "daylight",
-          "itemIdPrefix": "light-",
+          "itemIdPrefix": "device-light-",
           "refresh": true
         },
         {
           "id": "evening",
           "title": "Evening (30% / 30%)",
           "handler": "evening",
-          "itemIdPrefix": "light-",
+          "itemIdPrefix": "device-light-",
           "refresh": true
         },
         {
           "id": "nightlight",
           "title": "Nightlight (5% / 5%)",
           "handler": "nightlight",
-          "itemIdPrefix": "light-",
+          "itemIdPrefix": "device-light-",
           "refresh": true
         },
         {
           "id": "custom",
           "title": "Custom lighting...",
           "handler": "custom",
-          "itemIdPrefix": "light-",
+          "itemIdPrefix": "device-light-",
           "refresh": false
         }
       ]

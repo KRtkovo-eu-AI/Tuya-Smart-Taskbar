@@ -129,9 +129,19 @@ fn salamander_ipc_request(app: &AppHandle, request: &serde_json::Value) -> serde
     "list" => {
       let client = app.state::<SharedTuyaClient>();
       let config = app.state::<ConfigManager>();
-      match tauri::async_runtime::block_on(tray::fetch_device_statuses(&client, &config)) {
-        Ok((devices, statuses)) => {
-          serde_json::json!({"ok": true, "devices": devices, "statuses": statuses})
+      match tauri::async_runtime::block_on(tray::fetch_device_statuses_with_errors(
+        &client, &config,
+      )) {
+        Ok((devices, statuses, status_errors, rooms)) => {
+          let status_error_ids = status_errors.keys().cloned().collect::<Vec<_>>();
+          serde_json::json!({
+            "ok": true,
+            "devices": devices,
+            "statuses": statuses,
+            "statusErrors": status_errors,
+            "statusErrorIds": status_error_ids,
+            "rooms": rooms,
+          })
         }
         Err(error) => serde_json::json!({"ok": false, "error": error.to_string()}),
       }
@@ -188,7 +198,7 @@ fn salamander_ipc_command(app: &AppHandle, request: &serde_json::Value) -> serde
         .iter()
         .find(|s| LIGHT_TEMPERATURE_CODES.contains(&s.code.as_str()))
         .ok_or_else(|| "Temperature unsupported".to_string())?;
-      vec![
+      let settings = vec![
         TuyaCommand {
           code: brightness.code.clone(),
           value: light_percent_to_value(&brightness.code, percent as i32),
@@ -197,7 +207,45 @@ fn salamander_ipc_command(app: &AppHandle, request: &serde_json::Value) -> serde
           code: temperature.code.clone(),
           value: light_percent_to_value(&temperature.code, percent as i32),
         },
-      ]
+      ];
+      let expected_brightness = settings[0].value.clone();
+      let expected_temperature = settings[1].value.clone();
+      tuya
+        .send_device_commands(&device_id, settings)
+        .await
+        .map_err(|e| e.to_string())?;
+
+      // Tuya may apply the power state from the previous scene when a light is
+      // off. Wait until the requested values settle before switching it on.
+      for _ in 0..15 {
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        let current = tuya
+          .fetch_device_status(&device_id)
+          .await
+          .map_err(|e| e.to_string())?;
+        let brightness_ready = current
+          .iter()
+          .find(|s| LIGHT_BRIGHTNESS_CODES.contains(&s.code.as_str()))
+          .map(|s| s.value == expected_brightness)
+          .unwrap_or(false);
+        let temperature_ready = current
+          .iter()
+          .find(|s| LIGHT_TEMPERATURE_CODES.contains(&s.code.as_str()))
+          .map(|s| s.value == expected_temperature)
+          .unwrap_or(false);
+        if brightness_ready && temperature_ready {
+          break;
+        }
+      }
+      if let Some(switch) = switch {
+        if !switch.value.as_bool().unwrap_or(false) {
+          tuya
+            .send_device_command(&device_id, &switch.code, TuyaValue::Boolean(true))
+            .await
+            .map_err(|e| e.to_string())?;
+        }
+      }
+      Vec::new()
     } else if action == "toggle" {
       let switch = switch.ok_or_else(|| "Power switch unsupported".to_string())?;
       vec![TuyaCommand {
@@ -207,10 +255,14 @@ fn salamander_ipc_command(app: &AppHandle, request: &serde_json::Value) -> serde
     } else {
       return Err("Unsupported command".to_string());
     };
-    tuya
-      .send_device_commands(&device_id, commands)
-      .await
-      .map_err(|e| e.to_string())
+    if commands.is_empty() {
+      Ok(true)
+    } else {
+      tuya
+        .send_device_commands(&device_id, commands)
+        .await
+        .map_err(|e| e.to_string())
+    }
   }) {
     Ok(_) => serde_json::json!({"ok": true}),
     Err(error) => serde_json::json!({"ok": false, "error": error}),
@@ -280,8 +332,8 @@ async fn update_tray_menu(
     return;
   }
 
-  match tray::fetch_device_statuses(&client, &config_manager).await {
-    Ok((devices, new_statuses)) => {
+  match tray::fetch_device_statuses_with_errors(&client, &config_manager).await {
+    Ok((devices, new_statuses, _status_errors, rooms)) => {
       let old_cache = status_cache.read().await.clone();
 
       if is_auto_refresh
@@ -296,7 +348,7 @@ async fn update_tray_menu(
         let mut cache = status_cache.write().await;
         *cache = new_statuses;
       } else {
-        match tray::build_device_menu(app, &devices, &new_statuses, update_state).await {
+        match tray::build_device_menu(app, &devices, &new_statuses, &rooms, update_state).await {
           Ok((menu, new_registry_entries)) => {
             if let Some(tray) = app.tray_by_id("main") {
               let _ = tray.set_menu(Some(menu));
