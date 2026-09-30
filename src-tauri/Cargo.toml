@@ -1,6 +1,6 @@
 [package]
 name = "tuya-smart-taskbar"
-version = "2.2.0"
+version = "2.4.0"
 description = "System tray app for controlling Tuya Smart Devices"
 authors = ["Zahin A. Adib <adib23704@gmail.com>"]
 license = "MIT"
