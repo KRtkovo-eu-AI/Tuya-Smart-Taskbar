@@ -1,0 +1,82 @@
+{
+  "schema": 2,
+  "id": "TuyaSmartTaskbar.Devices",
+  "name": "Tuya Smart Devices",
+  "version": "2.4.0",
+  "description": "Displays and controls Tuya Smart devices monitored by Tuya Smart Taskbar.",
+  "runtime": "PowerShell",
+  "entryPoint": "main.ps1",
+  "web": "https://github.com/Adib23704/Tuya-Smart-Taskbar",
+  "security": {
+    "networkAccess": "no",
+    "externalProcesses": "no",
+    "scriptExecution": "yes",
+    "activeWebContent": "no",
+    "elevation": "never"
+  },
+  "icon": "icon.svg",
+  "iconDark": "icon-dark.svg",
+  "capabilities": ["file-system", "panels.write", "ui.dialogs"],
+  "events": [],
+  "commands": [
+    {
+      "id": "TuyaSmartTaskbar.Devices.open",
+      "title": "Open Tuya Smart Devices",
+      "path": "salamatrix:TuyaSmartTaskbar.Devices!devices",
+      "menu": "none",
+      "toolbar": true,
+      "icon": "icon.svg",
+      "iconDark": "icon-dark.svg",
+      "requires": "any"
+    }
+  ],
+  "locales": { "en": "locales/en.json" },
+  "fileSystems": [
+    {
+      "id": "devices",
+      "name": "Tuya Smart Devices",
+      "listHandler": "listDevices",
+      "icon": "icon.svg",
+      "iconDark": "icon-dark.svg",
+      "refreshIntervalMs": 5000,
+      "columns": [
+        { "id": "category", "name": "Type", "description": "Device type", "width": 120 },
+        { "id": "status", "name": "Status", "description": "Online or offline state", "width": 100 },
+        { "id": "power", "name": "Power", "description": "Current power state", "width": 90 },
+        { "id": "deviceId", "name": "Device ID", "description": "Tuya device identifier", "width": 250 }
+      ],
+      "actions": [
+        { "id": "openDevice", "title": "Open device", "handler": "openDevice", "default": true, "refresh": false },
+        { "id": "toggle", "title": "Toggle power", "handler": "toggle", "refresh": true },
+        {
+          "id": "daylight",
+          "title": "Daylight (70% / 70%)",
+          "handler": "daylight",
+          "itemIdPrefix": "light-",
+          "refresh": true
+        },
+        {
+          "id": "evening",
+          "title": "Evening (30% / 30%)",
+          "handler": "evening",
+          "itemIdPrefix": "light-",
+          "refresh": true
+        },
+        {
+          "id": "nightlight",
+          "title": "Nightlight (5% / 5%)",
+          "handler": "nightlight",
+          "itemIdPrefix": "light-",
+          "refresh": true
+        },
+        {
+          "id": "custom",
+          "title": "Custom lighting...",
+          "handler": "custom",
+          "itemIdPrefix": "light-",
+          "refresh": false
+        }
+      ]
+    }
+  ]
+}

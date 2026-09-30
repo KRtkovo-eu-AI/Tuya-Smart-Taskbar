@@ -4,6 +4,7 @@
 )]
 
 use std::collections::HashMap;
+use std::io::{BufRead, BufReader, Write};
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -37,6 +38,184 @@ const ICON_BYTES: &[u8] = include_bytes!("../icons/icon.ico");
 const LOADING_ICON_BYTES: &[u8] = include_bytes!("../icons/loading.ico");
 const UPDATE_ICON_BYTES: &[u8] = include_bytes!("../icons/update.ico");
 const UPDATE_CHECK_INTERVAL: u64 = 360;
+fn json_to_ascii(value: &serde_json::Value) -> String {
+  let json = serde_json::to_string(value).unwrap_or_else(|_| "{\"ok\":false}".to_string());
+  let mut output = String::with_capacity(json.len());
+  for character in json.chars() {
+    let code = character as u32;
+    if code <= 0x7f {
+      output.push(character);
+    } else if code <= 0xffff {
+      output.push_str(&format!("\\u{:04x}", code));
+    } else {
+      let value = code - 0x10000;
+      let high = 0xd800 + (value >> 10);
+      let low = 0xdc00 + (value & 0x3ff);
+      output.push_str(&format!("\\u{:04x}\\u{:04x}", high, low));
+    }
+  }
+  output
+}
+
+#[cfg(windows)]
+const SALAMANDER_PIPE_NAME: &str = r"\\.\pipe\TuyaSmartTaskbar";
+
+#[cfg(windows)]
+fn start_salamander_ipc(app: &AppHandle) {
+  use std::os::windows::io::FromRawHandle;
+  use windows::core::PCWSTR;
+  use windows::Win32::Storage::FileSystem::PIPE_ACCESS_DUPLEX;
+  use windows::Win32::System::Pipes::{
+    ConnectNamedPipe, CreateNamedPipeW, DisconnectNamedPipe, PIPE_READMODE_BYTE, PIPE_TYPE_BYTE,
+    PIPE_WAIT,
+  };
+
+  let app = app.clone();
+  std::thread::spawn(move || {
+    let pipe_name: Vec<u16> = SALAMANDER_PIPE_NAME.encode_utf16().chain(Some(0)).collect();
+    tracing::info!("Salamander IPC listening on {}", SALAMANDER_PIPE_NAME);
+    loop {
+      let pipe = unsafe {
+        CreateNamedPipeW(
+          PCWSTR(pipe_name.as_ptr()),
+          PIPE_ACCESS_DUPLEX,
+          PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
+          1,
+          64 * 1024,
+          64 * 1024,
+          1000,
+          None,
+        )
+      };
+      if pipe.is_invalid() {
+        tracing::error!("Could not create Salamander named pipe");
+        return;
+      }
+      let connected = unsafe { ConnectNamedPipe(pipe, None).is_ok() };
+      if !connected {
+        unsafe {
+          DisconnectNamedPipe(pipe).ok();
+        }
+        continue;
+      }
+      let raw = pipe.0;
+      let mut stream = unsafe { std::fs::File::from_raw_handle(raw) };
+      let request = {
+        let mut line = String::new();
+        let mut reader = BufReader::new(&stream);
+        if reader.read_line(&mut line).is_err() {
+          continue;
+        }
+        serde_json::from_str::<serde_json::Value>(&line).unwrap_or_default()
+      };
+      let response = salamander_ipc_request(&app, &request);
+      let body = json_to_ascii(&response);
+      let _ = writeln!(stream, "{}", body);
+    }
+  });
+}
+
+#[cfg(not(windows))]
+fn start_salamander_ipc(_app: &AppHandle) {
+  tracing::info!("Salamander named-pipe IPC is available on Windows only");
+}
+
+fn salamander_ipc_request(app: &AppHandle, request: &serde_json::Value) -> serde_json::Value {
+  let operation = request
+    .get("operation")
+    .and_then(|v| v.as_str())
+    .unwrap_or("");
+  match operation {
+    "list" => {
+      let client = app.state::<SharedTuyaClient>();
+      let config = app.state::<ConfigManager>();
+      match tauri::async_runtime::block_on(tray::fetch_device_statuses(&client, &config)) {
+        Ok((devices, statuses)) => {
+          serde_json::json!({"ok": true, "devices": devices, "statuses": statuses})
+        }
+        Err(error) => serde_json::json!({"ok": false, "error": error.to_string()}),
+      }
+    }
+    "command" => salamander_ipc_command(app, request),
+    _ => serde_json::json!({"ok": false, "error": "Unknown operation"}),
+  }
+}
+
+fn salamander_ipc_command(app: &AppHandle, request: &serde_json::Value) -> serde_json::Value {
+  let device_id = request
+    .get("deviceId")
+    .and_then(|v| v.as_str())
+    .unwrap_or("")
+    .to_string();
+  let action = request.get("action").and_then(|v| v.as_str()).unwrap_or("");
+  if device_id.is_empty() {
+    return serde_json::json!({"ok": false, "error": "Missing deviceId"});
+  }
+  if action == "custom" {
+    let name = tauri::async_runtime::block_on(async {
+      let client = app.state::<SharedTuyaClient>();
+      let config = app.state::<ConfigManager>();
+      tray::fetch_device_statuses(&client, &config)
+        .await
+        .ok()
+        .and_then(|(devices, _)| devices.into_iter().find(|device| device.id == device_id))
+        .map(|device| device.name)
+    })
+    .unwrap_or_else(|| "Lighting".to_string());
+    open_light_window(app, &device_id, &name);
+    return serde_json::json!({"ok": true});
+  }
+  let client = app.state::<SharedTuyaClient>();
+  let request = request.clone();
+  match tauri::async_runtime::block_on(async {
+    let guard = client.read().await;
+    let tuya = guard
+      .as_ref()
+      .ok_or_else(|| "Client not initialized".to_string())?;
+    let statuses = tuya
+      .fetch_device_status(&device_id)
+      .await
+      .map_err(|e| e.to_string())?;
+    let switch = statuses
+      .iter()
+      .find(|s| LIGHT_SWITCH_CODES.contains(&s.code.as_str()));
+    let commands = if let Some(percent) = request.get("percent").and_then(|v| v.as_i64()) {
+      let brightness = statuses
+        .iter()
+        .find(|s| LIGHT_BRIGHTNESS_CODES.contains(&s.code.as_str()))
+        .ok_or_else(|| "Brightness unsupported".to_string())?;
+      let temperature = statuses
+        .iter()
+        .find(|s| LIGHT_TEMPERATURE_CODES.contains(&s.code.as_str()))
+        .ok_or_else(|| "Temperature unsupported".to_string())?;
+      vec![
+        TuyaCommand {
+          code: brightness.code.clone(),
+          value: light_percent_to_value(&brightness.code, percent as i32),
+        },
+        TuyaCommand {
+          code: temperature.code.clone(),
+          value: light_percent_to_value(&temperature.code, percent as i32),
+        },
+      ]
+    } else if action == "toggle" {
+      let switch = switch.ok_or_else(|| "Power switch unsupported".to_string())?;
+      vec![TuyaCommand {
+        code: switch.code.clone(),
+        value: TuyaValue::Boolean(!switch.value.as_bool().unwrap_or(false)),
+      }]
+    } else {
+      return Err("Unsupported command".to_string());
+    };
+    tuya
+      .send_device_commands(&device_id, commands)
+      .await
+      .map_err(|e| e.to_string())
+  }) {
+    Ok(_) => serde_json::json!({"ok": true}),
+    Err(error) => serde_json::json!({"ok": false, "error": error}),
+  }
+}
 
 async fn update_tray_menu(
   app: &AppHandle,
@@ -691,6 +870,7 @@ fn main() {
       commands::app::open_external,
     ])
     .setup(move |app| {
+      start_salamander_ipc(app.handle());
       let icon = Image::from_bytes(ICON_BYTES).expect("Failed to load tray icon");
 
       let update_state_for_menu = update_state.clone();

@@ -1,0 +1,38 @@
+{
+  "name": "Tuya Smart Devices",
+  "description": "Displays and controls Tuya Smart devices monitored by Tuya Smart Taskbar.",
+  "commands": {
+    "TuyaSmartTaskbar.Devices.open": "Open Tuya Smart Devices"
+  },
+  "fileSystems": {
+    "devices": {
+      "name": "Tuya Smart Devices",
+      "columns": {
+        "category": {
+          "name": "Type",
+          "description": "Device type"
+        },
+        "status": {
+          "name": "Status",
+          "description": "Online or offline state"
+        },
+        "power": {
+          "name": "Power",
+          "description": "Current power state"
+        },
+        "deviceId": {
+          "name": "Device ID",
+          "description": "Tuya device identifier"
+        }
+      },
+      "actions": {
+        "openDevice": "Open device",
+        "toggle": "Toggle power",
+        "daylight": "Daylight (70% / 70%)",
+        "evening": "Evening (30% / 30%)",
+        "nightlight": "Nightlight (5% / 5%)",
+        "custom": "Custom lighting..."
+      }
+    }
+  }
+}
