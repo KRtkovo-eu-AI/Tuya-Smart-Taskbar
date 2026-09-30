@@ -7,6 +7,10 @@ settings:
 importers:
 
   .:
+    dependencies:
+      cargo:
+        specifier: ^0.8.0
+        version: 0.8.0
     devDependencies:
       '@biomejs/biome':
         specifier: ^2.5.10
@@ -150,6 +154,9 @@ packages:
     engines: {node: '>= 10'}
     hasBin: true
 
+  cargo@0.8.0:
+    resolution: {integrity: sha512-Fl49HZ8CAs4++TjtwcoZgwyq2ZQUiFVGQ3byyKKUilNk65iuBRDjpCGH/AUORvAODaVVbGbKyFCa67tlDG3p4g==}
+
 snapshots:
 
   '@biomejs/biome@2.5.10':
@@ -233,3 +240,5 @@ snapshots:
       '@tauri-apps/cli-win32-arm64-msvc': 2.11.4
       '@tauri-apps/cli-win32-ia32-msvc': 2.11.4
       '@tauri-apps/cli-win32-x64-msvc': 2.11.4
+
+  cargo@0.8.0: {}

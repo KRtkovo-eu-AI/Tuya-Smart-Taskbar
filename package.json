@@ -25,5 +25,8 @@
   "devDependencies": {
     "@biomejs/biome": "^2.5.10",
     "@tauri-apps/cli": "^2.11.4"
+  },
+  "dependencies": {
+    "cargo": "^0.8.0"
   }
 }
