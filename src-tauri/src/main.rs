@@ -18,7 +18,11 @@ use tuya_smart_taskbar::{
   commands,
   config::{set_auto_launch, ConfigManager},
   tray::{self, MenuItemRegistry},
-  tuya::{create_shared_client, initialize_client, SharedTuyaClient, TuyaDeviceStatus, TuyaValue},
+  tuya::{
+    create_shared_client, initialize_client, light_operation_active, light_percent_to_value,
+    mark_light_operation, SharedTuyaClient, TuyaCommand, TuyaDeviceStatus, TuyaValue,
+    LIGHT_BRIGHTNESS_CODES, LIGHT_SWITCH_CODES, LIGHT_TEMPERATURE_CODES,
+  },
   update::{self, create_update_state, SharedUpdateState},
 };
 
@@ -43,6 +47,10 @@ async fn update_tray_menu(
   menu_registry: &MenuItemRegistry,
 ) {
   if is_auto_refresh {
+    if light_operation_active() {
+      tracing::debug!("Skipping auto-refresh: light operation in progress");
+      return;
+    }
     let last_interaction = MENU_INTERACTION_TIME.load(Ordering::SeqCst);
     let now = chrono::Utc::now().timestamp_millis();
     if now - last_interaction < 2000 {
@@ -268,6 +276,17 @@ fn handle_menu_event(
     "open_about" => {
       open_about_window(app);
     }
+    _ if id.starts_with("custom_light:") => {
+      if let Some(rest) = id.strip_prefix("custom_light:") {
+        let mut parts = rest.splitn(2, ':');
+        if let (Some(device_id), Some(encoded_name)) = (parts.next(), parts.next()) {
+          let device_name = urlencoding::decode(encoded_name)
+            .map(|name| name.into_owned())
+            .unwrap_or_else(|_| "Custom lighting".to_string());
+          open_light_window(app, device_id, &device_name);
+        }
+      }
+    }
     "open_update" => {
       let _ = open::that(update::get_download_url());
     }
@@ -345,7 +364,152 @@ fn handle_menu_event(
     }
     _ if id.starts_with("set:") || id.starts_with("cmd:") => {
       if let Some((device_id, code, value_str)) = tray::parse_command_id(id) {
+        if code == "scene" {
+          let percentages: Vec<i32> = value_str
+            .split(':')
+            .filter_map(|v| v.parse().ok())
+            .collect();
+          if percentages.len() == 2 {
+            let app_handle = app.clone();
+            let cache = status_cache.clone();
+            let registry = menu_registry.clone();
+            mark_light_operation();
+            tauri::async_runtime::spawn(async move {
+              let statuses = cache
+                .read()
+                .await
+                .get(&device_id)
+                .cloned()
+                .unwrap_or_default();
+              let brightness = statuses
+                .iter()
+                .find(|s| LIGHT_BRIGHTNESS_CODES.contains(&s.code.as_str()));
+              let temperature = statuses
+                .iter()
+                .find(|s| LIGHT_TEMPERATURE_CODES.contains(&s.code.as_str()));
+              if let (Some(brightness), Some(temperature)) = (brightness, temperature) {
+                let settings = vec![
+                  TuyaCommand {
+                    code: brightness.code.clone(),
+                    value: light_percent_to_value(&brightness.code, percentages[0]),
+                  },
+                  TuyaCommand {
+                    code: temperature.code.clone(),
+                    value: light_percent_to_value(&temperature.code, percentages[1]),
+                  },
+                ];
+                let switch = statuses
+                  .iter()
+                  .find(|s| LIGHT_SWITCH_CODES.contains(&s.code.as_str()));
+                let client = app_handle.state::<SharedTuyaClient>();
+                let guard = client.read().await;
+                if let Some(tuya_client) = guard.as_ref() {
+                  let result = match tuya_client
+                    .send_device_commands(&device_id, settings.clone())
+                    .await
+                  {
+                    Ok(_) => {
+                      if let Some(switch) = switch {
+                        if !switch.value.as_bool().unwrap_or(false) {
+                          tuya_client
+                            .send_device_command(&device_id, &switch.code, TuyaValue::Boolean(true))
+                            .await
+                        } else {
+                          Ok(true)
+                        }
+                      } else {
+                        Ok(true)
+                      }
+                    }
+                    Err(e) => Err(e),
+                  };
+                  match result {
+                    Ok(_) => {
+                      let reg = registry.read().await;
+                      let mut cache_guard = cache.write().await;
+                      if let Some(switch) = switch {
+                        tray::update_single_device_status_in_place(
+                          &reg,
+                          &mut cache_guard,
+                          &device_id,
+                          &switch.code,
+                          &TuyaValue::Boolean(true),
+                        );
+                      }
+                      for command in settings {
+                        tray::update_single_device_status_in_place(
+                          &reg,
+                          &mut cache_guard,
+                          &device_id,
+                          &command.code,
+                          &command.value,
+                        );
+                      }
+                    }
+                    Err(e) => tracing::error!("Failed to apply lighting scene: {}", e),
+                  }
+                }
+              }
+            });
+          }
+          return;
+        }
         let value = tray::parse_value(&value_str);
+        if LIGHT_BRIGHTNESS_CODES.contains(&code.as_str())
+          || LIGHT_TEMPERATURE_CODES.contains(&code.as_str())
+        {
+          let app_handle = app.clone();
+          let cache = status_cache.clone();
+          let registry = menu_registry.clone();
+          mark_light_operation();
+          tauri::async_runtime::spawn(async move {
+            let statuses = cache
+              .read()
+              .await
+              .get(&device_id)
+              .cloned()
+              .unwrap_or_default();
+            let mut commands = vec![TuyaCommand {
+              code: code.clone(),
+              value: value.clone(),
+            }];
+            if let Some(switch) = statuses
+              .iter()
+              .find(|s| LIGHT_SWITCH_CODES.contains(&s.code.as_str()))
+            {
+              if !switch.value.as_bool().unwrap_or(false) {
+                commands.push(TuyaCommand {
+                  code: switch.code.clone(),
+                  value: TuyaValue::Boolean(true),
+                });
+              }
+            }
+            let client = app_handle.state::<SharedTuyaClient>();
+            let guard = client.read().await;
+            if let Some(tuya_client) = guard.as_ref() {
+              match tuya_client
+                .send_device_commands(&device_id, commands.clone())
+                .await
+              {
+                Ok(_) => {
+                  let reg = registry.read().await;
+                  let mut cache_guard = cache.write().await;
+                  for command in commands {
+                    tray::update_single_device_status_in_place(
+                      &reg,
+                      &mut cache_guard,
+                      &device_id,
+                      &command.code,
+                      &command.value,
+                    );
+                  }
+                }
+                Err(e) => tracing::error!("Failed to apply light setting: {}", e),
+              }
+            }
+          });
+          return;
+        }
         let app_handle = app.clone();
         let cache = status_cache.clone();
         let registry = menu_registry.clone();
@@ -389,6 +553,30 @@ fn handle_menu_event(
       }
     }
     _ => {}
+  }
+}
+
+fn open_light_window(app: &AppHandle, device_id: &str, device_name: &str) {
+  let label = format!("custom_light_{}", device_id);
+  if let Some(window) = app.get_webview_window(&label) {
+    let _ = window.show();
+    let _ = window.set_focus();
+    return;
+  }
+  let url = format!(
+    "pages/light.html?device_id={}&device_name={}",
+    device_id,
+    urlencoding::encode(device_name),
+  );
+  let window = tauri::WebviewWindowBuilder::new(app, &label, tauri::WebviewUrl::App(url.into()))
+    .title(device_name)
+    .inner_size(420.0, 430.0)
+    .resizable(false)
+    .center()
+    .visible(true)
+    .build();
+  if let Err(e) = window {
+    tracing::error!("Failed to create lighting window: {}", e);
   }
 }
 
@@ -445,7 +633,7 @@ fn main() {
     )
     .init();
 
-  tracing::info!("Starting Tuya Smart Taskbar v2.2.0");
+  tracing::info!("Starting Tuya Smart Taskbar v{}", env!("CARGO_PKG_VERSION"));
 
   let config_manager = ConfigManager::new();
   let shared_client = create_shared_client();
@@ -496,6 +684,7 @@ fn main() {
       commands::devices::fetch_devices,
       commands::devices::fetch_device_status,
       commands::devices::send_device_command,
+      commands::devices::set_light_settings,
       commands::devices::toggle_device_state,
       commands::app::get_version,
       commands::app::check_for_update,

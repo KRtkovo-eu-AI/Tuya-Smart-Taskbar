@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Custom lighting</title>
+<style>
+body{font:14px system-ui,sans-serif;margin:0;padding:24px;background:#202124;color:#eee}h1{font-size:20px;margin:0 0 24px}label{display:block;margin:18px 0 8px}input[type=range]{width:100%}.row{display:flex;justify-content:space-between;align-items:center}button{margin-top:24px;width:100%;padding:10px;border:0;border-radius:6px;background:#4f8cff;color:white;font-weight:600}#error{color:#ff8a80;margin-top:16px}
+</style></head>
+<body>
+<h1 id="deviceName">Lighting</h1>
+<div class="row"><span>Light</span><input id="power" type="checkbox"></div>
+<div class="row live-row"><label for="live">Live apply</label><input id="live" type="checkbox"></div>
+<label for="brightness">Intensity: <output id="brightnessValue">70%</output></label>
+<input id="brightness" type="range" min="5" max="100" value="70">
+<label for="temperature">White temperature: <output id="temperatureValue">70%</output></label>
+<input id="temperature" type="range" min="5" max="100" value="70">
+<button id="apply" type="button">Apply</button><div id="error"></div>
+<script>
+const {invoke}=window.__TAURI__.core;
+const params=new URLSearchParams(location.search);const deviceId=params.get('device_id');
+document.querySelector('#deviceName').textContent=params.get('device_name')||'Lighting';
+const brightness=document.querySelector('#brightness'),temperature=document.querySelector('#temperature'),power=document.querySelector('#power'),live=document.querySelector('#live'),applyButton=document.querySelector('#apply'),error=document.querySelector('#error');
+let liveTimer;let applying=false;let sliderActive=false;let syncPaused=false;
+const show=()=>{document.querySelector('#brightnessValue').textContent=`${brightness.value}%`;document.querySelector('#temperatureValue').textContent=`${temperature.value}%`};
+function number(v){if(typeof v==='number')return v;const n=Number(v);return Number.isFinite(n)?n:0}
+function percent(v,code){const n=number(v);return code.endsWith('_v2')?Math.max(5,Math.min(100,Math.round(n/10))):Math.max(5,Math.min(100,n))}
+async function readState(){
+  if(applying||sliderActive||syncPaused)return;
+  try{
+    const status=await invoke('fetch_device_status',{deviceId});let b,t,p,bCode,tCode;
+    for(const item of status){
+      if(['bright_value_v2','bright_value','brightness'].includes(item.code)){b=item.value;bCode=item.code}
+      if(['temp_value_v2','temp_value','temperature'].includes(item.code)){t=item.value;tCode=item.code}
+      if(['switch_led','switch','power','switch_1'].includes(item.code))p=item.value;
+    }
+    if(b===undefined||t===undefined)throw Error('This device does not expose brightness and white temperature');
+    brightness.value=percent(b,bCode);temperature.value=percent(t,tCode);if(p!==undefined)power.checked=!!p;show();error.textContent='';
+  }catch(e){error.textContent=String(e)}
+}
+async function apply(){
+  if(applying)return;applying=true;syncPaused=true;applyButton.disabled=true;
+  try{await invoke('set_light_settings',{deviceId,brightness:Number(brightness.value),temperature:Number(temperature.value),power:power.checked});error.textContent='Applied';await new Promise(resolve=>setTimeout(resolve,100));await readState()}catch(e){error.textContent=String(e)}finally{applying=false;syncPaused=false;applyButton.disabled=false}
+}
+function beginUserAction(){syncPaused=true;sliderActive=true;clearTimeout(liveTimer)}
+function finishUserAction(){sliderActive=false;show();if(live.checked){clearTimeout(liveTimer);liveTimer=setTimeout(apply,300)}else{syncPaused=false;readState()}}
+brightness.onpointerdown=beginUserAction;temperature.onpointerdown=beginUserAction;power.onpointerdown=beginUserAction;
+brightness.onpointerup=finishUserAction;temperature.onpointerup=finishUserAction;power.onpointerup=finishUserAction;
+brightness.oninput=show;temperature.oninput=show;
+power.onchange=()=>{if(live.checked)apply()};live.onchange=()=>{if(live.checked)apply()};applyButton.onclick=apply;
+readState();setInterval(readState,500);
+</script></body></html>

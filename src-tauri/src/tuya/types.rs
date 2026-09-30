@@ -1,3 +1,5 @@
+use std::sync::atomic::{AtomicI64, Ordering};
+
 use serde::{Deserialize, Serialize};
 
 pub const TOKEN_REFRESH_BUFFER_SECS: i64 = 300;
@@ -157,6 +159,24 @@ pub const AC_FAN_SPEED_LEVELS: i32 = 4;
 
 pub const TEMP_MIN: i32 = 16;
 pub const TEMP_MAX: i32 = 30;
+pub const LIGHT_BRIGHTNESS_CODES: &[&str] = &["bright_value_v2", "bright_value", "brightness"];
+pub const LIGHT_TEMPERATURE_CODES: &[&str] = &["temp_value_v2", "temp_value", "temperature"];
+pub const LIGHT_SWITCH_CODES: &[&str] = &["switch_led", "switch", "power", "switch_1"];
+pub static LIGHT_OPERATION_UNTIL: AtomicI64 = AtomicI64::new(0);
+
+pub fn mark_light_operation() {
+  let until = chrono::Utc::now().timestamp_millis() + 5000;
+  LIGHT_OPERATION_UNTIL.store(until, Ordering::SeqCst);
+}
+
+pub fn light_operation_active() -> bool {
+  chrono::Utc::now().timestamp_millis() < LIGHT_OPERATION_UNTIL.load(Ordering::SeqCst)
+}
+
+pub fn light_percent_to_value(code: &str, percent: i32) -> TuyaValue {
+  let scale = if code.ends_with("_v2") { 10 } else { 1 };
+  TuyaValue::Integer((percent.clamp(1, 100) * scale).clamp(1, 1000) as i64)
+}
 
 pub fn parse_fan_speed(value: &TuyaValue) -> i32 {
   if let Some(s) = value.as_string() {

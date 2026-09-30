@@ -12,7 +12,8 @@ use crate::config::ConfigManager;
 use crate::error::AppError;
 use crate::tuya::{
   parse_ac_fan_speed, parse_fan_speed, parse_temperature, SharedTuyaClient, TuyaDevice,
-  TuyaDeviceStatus, TuyaValue, AC_FAN_SPEED_LEVELS, AC_MODES, FAN_SPEED_LEVELS, TEMP_MAX, TEMP_MIN,
+  TuyaDeviceStatus, TuyaValue, AC_FAN_SPEED_LEVELS, AC_MODES, FAN_SPEED_LEVELS,
+  LIGHT_BRIGHTNESS_CODES, LIGHT_TEMPERATURE_CODES, TEMP_MAX, TEMP_MIN,
 };
 use crate::update::SharedUpdateState;
 
@@ -44,7 +45,53 @@ pub fn build_device_submenu(
 ) -> Result<Submenu<Wry>, AppError> {
   let submenu = Submenu::new(app, &device.name, true).map_err(|e| AppError::Tray(e.to_string()))?;
 
+  let has_lighting_controls = status
+    .iter()
+    .any(|s| LIGHT_BRIGHTNESS_CODES.contains(&s.code.as_str()))
+    && status
+      .iter()
+      .any(|s| LIGHT_TEMPERATURE_CODES.contains(&s.code.as_str()));
+  if has_lighting_controls {
+    let lighting =
+      Submenu::new(app, "Lighting", true).map_err(|e| AppError::Tray(e.to_string()))?;
+    for (label, percent) in [
+      ("Daylight (70% / 70%)", 70),
+      ("Evening (30% / 30%)", 30),
+      ("Nightlight (5% / 5%)", 5),
+    ] {
+      let id = format!("cmd:{}:scene:{}:{}", device.id, percent, percent);
+      let item = MenuItem::with_id(app, &id, label, true, None::<&str>)
+        .map_err(|e| AppError::Tray(e.to_string()))?;
+      lighting
+        .append(&item)
+        .map_err(|e| AppError::Tray(e.to_string()))?;
+    }
+    let custom = MenuItem::with_id(
+      app,
+      format!(
+        "custom_light:{}:{}",
+        device.id,
+        urlencoding::encode(&device.name)
+      ),
+      "Custom",
+      true,
+      None::<&str>,
+    )
+    .map_err(|e| AppError::Tray(e.to_string()))?;
+    lighting
+      .append(&custom)
+      .map_err(|e| AppError::Tray(e.to_string()))?;
+    submenu
+      .append(&lighting)
+      .map_err(|e| AppError::Tray(e.to_string()))?;
+  }
+
   for s in status {
+    if LIGHT_BRIGHTNESS_CODES.contains(&s.code.as_str())
+      || LIGHT_TEMPERATURE_CODES.contains(&s.code.as_str())
+    {
+      continue;
+    }
     match s.code.as_str() {
       _ if s.value.as_bool().is_some() => {
         let checked = s.value.as_bool().unwrap_or(false);
